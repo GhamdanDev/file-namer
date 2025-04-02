@@ -1,7 +1,4 @@
-# This workflow will build a golang project
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-go
-
-name: Go
+name: Go Build and Release
 
 on:
   push:
@@ -10,11 +7,11 @@ on:
     branches: [ "main" ]
 
 jobs:
-
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
     - name: Set up Go
       uses: actions/setup-go@v4
@@ -26,3 +23,46 @@ jobs:
 
     - name: Test
       run: go test -v ./...
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Required for tagging latest commit
+
+    - name: Get latest tag
+      id: get_latest_tag
+      run: |
+        latest_tag=$(git describe --tags `git rev-list --tags --max-count=1` || echo "v0.0.0")
+        echo "latest_tag=$latest_tag" >> $GITHUB_ENV
+
+    - name: Increment version
+      id: bump_version
+      run: |
+        latest_tag=${{ env.latest_tag }}
+        IFS='.' read -r -a parts <<< "${latest_tag:1}" # Remove 'v' prefix
+        major=${parts[0]}
+        minor=${parts[1]}
+        patch=${parts[2]}
+        new_version="v$major.$minor.$((patch+1))"
+        echo "new_version=$new_version" >> $GITHUB_ENV
+
+    - name: Create tag
+      run: |
+        git config --global user.name "github-actions"
+        git config --global user.email "github-actions@github.com"
+        git tag ${{ env.new_version }}
+        git push origin ${{ env.new_version }}
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ env.new_version }}
+        name: Release ${{ env.new_version }}
+        body: "Automated release of ${{ env.new_version }}."
+        draft: false
+        prerelease: false
